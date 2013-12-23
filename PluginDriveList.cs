@@ -16,26 +16,29 @@ namespace PluginDriveList
 
         internal Measure()
         {
-            listedTypes = new List<DriveType> { DriveType.Fixed, DriveType.Network, DriveType.Ram, DriveType.Unknown };
+            listedTypes = new List<DriveType> { DriveType.Fixed, DriveType.Network, DriveType.Ram };
             listedDrives = new List<string>();
             currentIndex = 0;
         }
 
         internal void Reload(Rainmeter.API rm, ref double maxValue)
         {
-            bool listOptical = (rm.ReadInt("IncludeOptical", 0) == 1 ? true : false);
-            bool listRemovable = (rm.ReadInt("IncludeRemovable", 0) == 1 ? true : false);
+            bool listOptical = (rm.ReadInt("Optical", 0) == 1 ? true : false);
+            bool listRemovable = (rm.ReadInt("Removable", 0) == 1 ? true : false);
+            bool listNetwork = (rm.ReadInt("Network", 0) == 1 ? true : false);
 
-            adjustTypeList(listOptical, listRemovable);
+            updateTypeList(listOptical, listRemovable, listNetwork);
 
+            allDrives = DriveInfo.GetDrives();
         }
 
         internal double Update()
         {
-            DriveInfo[] oldList = (DriveInfo[])allDrives.Clone();
-            allDrives = DriveInfo.GetDrives();
-            if (!oldList.Equals(allDrives)) // connected drives have changed somehow, regenerate list
+            DriveInfo[] newDrives = DriveInfo.GetDrives();
+            
+            if (!newDrives.Equals(allDrives)) // connected drives have changed somehow, regenerate list
             {
+                allDrives = newDrives;
                 updateListedDrives();
             }
 
@@ -47,7 +50,17 @@ namespace PluginDriveList
 
         internal string GetString()
         {
-            return listedDrives[currentIndex];
+            try
+            {
+                return listedDrives[currentIndex];
+            }
+            catch
+            {
+#if DEBUG
+                API.Log(API.LogType.Warning, "Waiting on a valid index");
+#endif
+                return "C:\\";
+            }
         }
 
         internal void ExecuteBang(string args)
@@ -66,7 +79,7 @@ namespace PluginDriveList
             }
         }
 
-        private void adjustTypeList(bool incOpt, bool incRem)
+        private void updateTypeList(bool incOpt, bool incRem, bool incNet)
         {
             bool already = listedTypes.Contains(DriveType.CDRom);
             if (incOpt && !already)
@@ -87,6 +100,16 @@ namespace PluginDriveList
             {
                 listedTypes.Remove(DriveType.Removable);
             }
+
+            already = listedTypes.Contains(DriveType.Network);
+            if (incNet && !already)
+            {
+                listedTypes.Add(DriveType.Network);
+            }
+            else if (!incNet && already)
+            {
+                listedTypes.Remove(DriveType.Network);
+            }
         }
 
         private void updateListedDrives()
@@ -94,9 +117,12 @@ namespace PluginDriveList
             listedDrives.Clear();
             foreach (DriveInfo d in allDrives)
             {
+#if DEBUG
+                API.Log(API.LogType.Debug, "Found drive " + d.Name);
+#endif
                 if (d.IsReady && listedTypes.Contains(d.DriveType))
                 {
-                    listedDrives.Add(d.Name.Substring(0, 2));
+                    listedDrives.Add(d.Name);
 #if DEBUG
                         API.Log(API.LogType.Debug, "Added drive " + d.Name);
 #endif
@@ -148,12 +174,12 @@ namespace PluginDriveList
             fixed (char* s = Measures[id].GetString()) return s;
         }
 
-        //[DllExport]
-        //public unsafe static void ExecuteBang(void* data, char* args)
-        //{
-        //    uint id = (uint)data;
-        //    Measures[id].ExecuteBang(new string(args));
-        //}
+        [DllExport]
+        public unsafe static void ExecuteBang(void* data, char* args)
+        {
+            uint id = (uint)data;
+            Measures[id].ExecuteBang(new string(args));
+        }
 
         internal static Dictionary<uint, Measure> Measures = new Dictionary<uint, Measure>();
     }

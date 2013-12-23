@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("PluginDriveList")]
+[assembly: AssemblyTitle("DriveList")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyProduct("Rainmeter")]
 [assembly: AssemblyCopyright("Copyright © Matthew Seiler 2013")]
