@@ -8,39 +8,59 @@ namespace PluginDriveList
 {
     internal class Measure
     {
+        private Dictionary<DriveType, bool> listedTypes;
+        private string ErrorString;
+        private DriveInfo[] allDrives;
+        private List<string> listedDrives;
+        private int currentIndex;
+        private bool needUpdate;
 
-        internal List<DriveType> listedTypes;
-        internal DriveInfo[] allDrives;
-        internal List<string> listedDrives;
-        internal int currentIndex;
-
+        /* Measure object constructor initializes class fields
+         */
         internal Measure()
         {
-            listedTypes = new List<DriveType> { DriveType.Fixed, DriveType.Network, DriveType.Ram };
+            listedTypes = new Dictionary<DriveType, bool>
+                {
+                    {DriveType.Fixed, true},
+                    {DriveType.Network, true},
+                    {DriveType.Removable, true},
+                    {DriveType.CDRom, false},
+                    {DriveType.Ram, false},
+                    {DriveType.NoRootDirectory, false},
+                    {DriveType.Unknown, false}
+                };
             listedDrives = new List<string>();
             currentIndex = 0;
+            needUpdate = true;
         }
 
         internal void Reload(Rainmeter.API rm, ref double maxValue)
         {
-            bool listOptical = (rm.ReadInt("Optical", 0) == 1 ? true : false);
-            bool listRemovable = (rm.ReadInt("Removable", 0) == 1 ? true : false);
-            bool listNetwork = (rm.ReadInt("Network", 0) == 1 ? true : false);
+            // cache type settings from before laste Reload
+            Dictionary<DriveType, bool> oldSettings = new Dictionary<DriveType, bool>(listedTypes);
+            // set type settings
+            listedTypes[DriveType.Fixed] = (rm.ReadInt("Fixed", 1) == 1 ? true : false);
+            listedTypes[DriveType.Removable] = (rm.ReadInt("Removable", 0) == 1 ? true : false);
+            listedTypes[DriveType.Network] = (rm.ReadInt("Network", 0) == 1 ? true : false);
+            listedTypes[DriveType.CDRom] = (rm.ReadInt("Optical", 0) == 1 ? true : false);
+            listedTypes[DriveType.Ram] = (rm.ReadInt("Ram", 0) == 1 ? true : false);
+            // if any of the settings changes, then flag for a list update
+            if (!oldSettings.Equals(listedTypes)) needUpdate = true;
 
-            updateTypeList(listOptical, listRemovable, listNetwork);
-
-            allDrives = DriveInfo.GetDrives();
         }
 
         internal double Update()
         {
-            DriveInfo[] newDrives = DriveInfo.GetDrives();
-            
-            if (!newDrives.Equals(allDrives)) // connected drives have changed somehow, regenerate list
+            DriveInfo[] newDrives = DriveInfo.GetDrives();  // get array of DriveInfo objects
+            // if the connected drives have changes somehow, copy to allDrives and flag for list update
+            if (!newDrives.Equals(allDrives))
             {
                 allDrives = newDrives;
-                updateListedDrives();
+                needUpdate = true;
             }
+            // if the flag is set, run an update.  
+            if (needUpdate) 
+                updateListedDrives();
 
             if (listedDrives.Count < 1)
                 API.Log(API.LogType.Error, "DriveList: no drives?!");
@@ -50,17 +70,19 @@ namespace PluginDriveList
 
         internal string GetString()
         {
+            string t;
             try
             {
-                return listedDrives[currentIndex];
+                t = listedDrives[currentIndex];
             }
             catch
             {
 #if DEBUG
-                API.Log(API.LogType.Warning, "Waiting on a valid index");
+                API.Log(API.LogType.Warning, "Caught an IndexOOB exception");
 #endif
-                return "C:\\";
+                t = ErrorString;
             }
+            return t;
         }
 
         internal void ExecuteBang(string args)
@@ -79,39 +101,8 @@ namespace PluginDriveList
             }
         }
 
-        private void updateTypeList(bool incOpt, bool incRem, bool incNet)
-        {
-            bool already = listedTypes.Contains(DriveType.CDRom);
-            if (incOpt && !already)
-            {
-                listedTypes.Add(DriveType.CDRom);
-            }
-            else if (!incOpt && already)
-            {
-                listedTypes.Remove(DriveType.CDRom);
-            }
-
-            already = listedTypes.Contains(DriveType.Removable);
-            if (incRem && !already)
-            {
-                listedTypes.Add(DriveType.Removable);
-            }
-            else if (!incOpt && already)
-            {
-                listedTypes.Remove(DriveType.Removable);
-            }
-
-            already = listedTypes.Contains(DriveType.Network);
-            if (incNet && !already)
-            {
-                listedTypes.Add(DriveType.Network);
-            }
-            else if (!incNet && already)
-            {
-                listedTypes.Remove(DriveType.Network);
-            }
-        }
-
+        /* Clears and repopulates the list of drive names.
+         */
         private void updateListedDrives()
         {
             listedDrives.Clear();
@@ -120,11 +111,11 @@ namespace PluginDriveList
 #if DEBUG
                 API.Log(API.LogType.Debug, "Found drive " + d.Name);
 #endif
-                if (d.IsReady && listedTypes.Contains(d.DriveType))
+                if (d.IsReady && listedTypes[d.DriveType])
                 {
                     listedDrives.Add(d.Name);
 #if DEBUG
-                        API.Log(API.LogType.Debug, "Added drive " + d.Name);
+                    API.Log(API.LogType.Debug, "Added drive " + d.Name);
 #endif
                 }
             }
@@ -133,6 +124,8 @@ namespace PluginDriveList
             {
                 currentIndex = listedDrives.Count - 1;
             }
+
+            needUpdate = false; // reset the update flag
         }
 
     }
