@@ -30,14 +30,10 @@ namespace PluginDriveList
         private Dictionary<DriveType, bool> listedTypes;
         // GetString() returns this value on error
         private string ErrorString;
-        // Array of DriveInfo objects representing all connected drives
-        private DriveInfo[] allDrives;
         // List of drive letters that we can return
-        private List<string> listedDrives;
+        private List<string> driveLetters;
         // Index of the "current" element in the above list.
         private int currentIndex;
-        // Flag indicating whether or not to update listedDrives this cycle.
-        private bool needUpdate;
 
         /* Measure object constructor initializes class fields
          */
@@ -53,55 +49,36 @@ namespace PluginDriveList
                     {DriveType.NoRootDirectory, false},
                     {DriveType.Unknown, false}
                 };
-            listedDrives = new List<string>();
+            driveLetters = new List<string>();
             currentIndex = 0;
-            needUpdate = true;
         }
 
         /* Runs on load/refresh on on every update cycle if DynamicVariables is set.
-         * Reads error string and drive type settings.  For DynamicVariables - if
-         * the type settings dictionary from this reload is different from that of the 
-         * last reload, then set the update flag.
+         * Reads error string and drive type settings.
          */
         internal void Reload(Rainmeter.API rm, ref double maxValue)
         {
             ErrorString = rm.ReadString("ErrorString", "oops.");
-            // cache type settings from last Reload
-            Dictionary<DriveType, bool> oldSettings = new Dictionary<DriveType, bool>(listedTypes);
             // set type settings in dictionary
             listedTypes[DriveType.Fixed] = (rm.ReadInt("Fixed", 1) == 1 ? true : false);
             listedTypes[DriveType.Removable] = (rm.ReadInt("Removable", 1) == 1 ? true : false);
             listedTypes[DriveType.Network] = (rm.ReadInt("Network", 1) == 1 ? true : false);
             listedTypes[DriveType.CDRom] = (rm.ReadInt("Optical", 0) == 1 ? true : false);
             listedTypes[DriveType.Ram] = (rm.ReadInt("Ram", 0) == 1 ? true : false);
-            // if any of the settings changes, then flag for a list update
-            if (!oldSettings.Equals(listedTypes)) 
-                needUpdate = true;
         }
 
-        /* Runs every update cycle.  Checks connected to drives w/ GetDrives, and
-         * sets the update flag to true if the DriveInfo array from this update differs
-         * form that of the last update.
-         * updateListedDrives() is called if the update flag is set.
-         * Returns the number of items in listedDrives.
+        /* Runs every update cycle.  Retrieves connected drives with GetDrives(),
+         * and passes that array to a method that builds the list of drive letters.
+         * Returns the number of items in that list (driveLetters).
          */
         internal double Update()
         {
-            DriveInfo[] newDrives = DriveInfo.GetDrives();  // get array of DriveInfo objects
-            // if the connected drives have changes somehow, copy to allDrives and flag for list update
-            if (!newDrives.Equals(allDrives))
-            {
-                allDrives = newDrives;
-                needUpdate = true;
-            }
-            // if the flag is set, run an update.  
-            if (needUpdate) 
-                updateListedDrives();
-            // if the drive list is empty (error, or settings that exclude all types) then log that
-            if (listedDrives.Count < 1)
-                API.Log(API.LogType.Warning, "DriveList: no drives listed");
+            // get array of DriveInfo objects
+            DriveInfo[] allDriveInfo = DriveInfo.GetDrives();
+            // make list of drive letters
+            buildDriveLetterList(allDriveInfo);
             // return the number of drives in the list
-            return (double)listedDrives.Count;
+            return (double)driveLetters.Count;
         }
 
         /* Returns the drive letter of the drive at CurrentIndex in listedDrives,
@@ -112,7 +89,7 @@ namespace PluginDriveList
             string t;
             try
             {
-                t = listedDrives[currentIndex];
+                t = driveLetters[currentIndex];
             }
             catch
             {
@@ -133,10 +110,10 @@ namespace PluginDriveList
             switch (args.ToLowerInvariant())
             {
                 case "forward":
-                    currentIndex = ((currentIndex + 1) % listedDrives.Count);
+                    currentIndex = ((currentIndex + 1) % driveLetters.Count);
                     break;
                 case "backward":
-                    currentIndex = (int)( (currentIndex - 1) - ( Math.Floor( (currentIndex - 1D) / listedDrives.Count ) * listedDrives.Count ) );
+                    currentIndex = (int)((currentIndex - 1) - (Math.Floor((currentIndex - 1D) / driveLetters.Count) * driveLetters.Count));
                     break;
                 default:
                     API.Log(API.LogType.Error, "DriveList: Invalid command \"" + args + "\"");
@@ -144,22 +121,21 @@ namespace PluginDriveList
             }
         }
 
-        /* Clears and repopulates the list of drive names, 
-         * and resets the update flag.
+        /* Clears and repopulates the list of drive letters.
          */
-        private void updateListedDrives()
+        private void buildDriveLetterList(DriveInfo[] drives)
         {
-            listedDrives.Clear();
-            foreach (DriveInfo d in allDrives)
+            driveLetters.Clear();
+            foreach (DriveInfo d in drives)
             {
                 if (d.IsReady && listedTypes[d.DriveType])
-                    listedDrives.Add(d.Name.Substring(0, 2));
+                    driveLetters.Add(d.Name.Substring(0, 2));
             }
             // make sure the index is not out of bounds.  Will set the index to -1 if there are no drives in the list.
-            if (currentIndex >= listedDrives.Count)
-                currentIndex = listedDrives.Count - 1;
-            // reset the update flag
-            needUpdate = false;
+            if (currentIndex >= driveLetters.Count)
+            {
+                currentIndex = driveLetters.Count - 1;
+            }
         }
 
     }

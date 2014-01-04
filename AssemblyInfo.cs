@@ -8,15 +8,15 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyTitle("DriveList")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyProduct("Rainmeter")]
-[assembly: AssemblyCopyright("Copyright © Matthew Seiler 2013")]
+[assembly: AssemblyCopyright("© 2013 - Matthew Seiler")]
 
 // Version information for an assembly consists of the following four values:
 //      Major Version
 //      Minor Version 
 //      Build Number
 //      Revision
-[assembly: AssemblyVersion("0.1.0.0")]
-[assembly: AssemblyFileVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyFileVersion("0.2.0.0")]
 
 #if X64
 [assembly: AssemblyInformationalVersion("2.5.0.1842 (64-bit)")]
