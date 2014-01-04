@@ -128,8 +128,11 @@ namespace PluginDriveList
             driveLetters.Clear();
             foreach (DriveInfo d in drives)
             {
-                if (d.IsReady && listedTypes[d.DriveType])
+                // if the type is set to true and it is an optical drive or it is "ready", then add to list
+                if ( listedTypes[d.DriveType] && (d.DriveType == DriveType.CDRom || d.IsReady) )
+                {
                     driveLetters.Add(d.Name.Substring(0, 2));
+                }
             }
             // make sure the index is not out of bounds.  Will set the index to -1 if there are no drives in the list.
             if (currentIndex >= driveLetters.Count)
