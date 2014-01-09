@@ -29,7 +29,7 @@ namespace PluginDriveList
         // Dict to track drive type settings
         private Dictionary<DriveType, bool> listedTypes;
         // GetString() returns this value on error
-        private string ErrorString;
+        private string errorString;
         // List of drive letters that we can return
         private List<string> driveLetters;
         // Index of the "current" element in the above list.
@@ -49,6 +49,7 @@ namespace PluginDriveList
                     {DriveType.NoRootDirectory, false},
                     {DriveType.Unknown, false}
                 };
+            errorString = "";
             driveLetters = new List<string>();
             currentIndex = 0;
         }
@@ -58,7 +59,7 @@ namespace PluginDriveList
          */
         internal void Reload(Rainmeter.API rm, ref double maxValue)
         {
-            ErrorString = rm.ReadString("ErrorString", "oops.");
+            errorString = rm.ReadString("ErrorString", "oops.");
             // set type settings in dictionary
             listedTypes[DriveType.Fixed] = (rm.ReadInt("Fixed", 1) == 1 ? true : false);
             listedTypes[DriveType.Removable] = (rm.ReadInt("Removable", 1) == 1 ? true : false);
@@ -73,10 +74,10 @@ namespace PluginDriveList
          */
         internal double Update()
         {
-            // get array of DriveInfo objects
-            DriveInfo[] allDriveInfo = DriveInfo.GetDrives();
             // make list of drive letters
-            buildDriveLetterList(allDriveInfo);
+            buildDriveLetterList();
+            // check to make sure CurrentIndex is OKAY
+            checkIndexRange();
             // return the number of drives in the list
             return (double)driveLetters.Count;
         }
@@ -96,7 +97,7 @@ namespace PluginDriveList
 #if DEBUG
                 API.Log(API.LogType.Warning, "DriveList: caught exception in GetString");
 #endif
-                t = ErrorString;
+                t = errorString;
             }
             return t;
         }
@@ -121,20 +122,32 @@ namespace PluginDriveList
             }
         }
 
-        /* Clears and repopulates the list of drive letters.
+        /* Clears and repopulates the list of drive letters
+         * from an array of DriveInfo objects.
          */
-        private void buildDriveLetterList(DriveInfo[] drives)
+        private void buildDriveLetterList()
         {
-            driveLetters.Clear();
+            List<string> temp = new List<string>();
+            // get array of DriveInfo objects
+            DriveInfo[] drives = DriveInfo.GetDrives();
             foreach (DriveInfo d in drives)
             {
                 // if the type is set to true and it is an optical drive or it is "ready", then add to list
                 if ( listedTypes[d.DriveType] && (d.DriveType == DriveType.CDRom || d.IsReady) )
                 {
-                    driveLetters.Add(d.Name.Substring(0, 2));
+                    temp.Add(d.Name.Substring(0, 2));
                 }
             }
-            // make sure the index is not out of bounds.  Will set the index to -1 if there are no drives in the list.
+            // attempt to limit shared memory access in future threading by only accessing driveLetters in one place?
+            driveLetters.Clear();
+            driveLetters.AddRange(temp);
+        }
+
+        /* Make sure the index is not out of bounds.  
+         * Will set the index to -1 if there are no drives in the list.
+         */
+        private void checkIndexRange()
+        { 
             if (currentIndex >= driveLetters.Count)
             {
                 currentIndex = driveLetters.Count - 1;
