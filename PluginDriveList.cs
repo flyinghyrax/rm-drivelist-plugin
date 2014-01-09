@@ -20,6 +20,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Rainmeter;
 
 namespace PluginDriveList
@@ -74,8 +75,10 @@ namespace PluginDriveList
          */
         internal double Update()
         {
-            // make list of drive letters
-            buildDriveLetterList();
+            // make list of drive letters (in new thread)
+            Thread listThread = new Thread(new ThreadStart(buildDriveLetterList));
+            listThread.IsBackground = true;
+            listThread.Start();
             // check to make sure CurrentIndex is OKAY
             checkIndexRange();
             // return the number of drives in the list
