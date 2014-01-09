@@ -27,6 +27,8 @@ namespace PluginDriveList
 {
     internal class Measure
     {
+        private IntPtr skinHandle;
+        private string finishAction;
         // Dict to track drive type settings
         private Dictionary<DriveType, bool> listedTypes;
         // GetString() returns this value on error
@@ -40,6 +42,7 @@ namespace PluginDriveList
          */
         internal Measure()
         {
+            
             listedTypes = new Dictionary<DriveType, bool>
                 {
                     {DriveType.Fixed, true},
@@ -60,13 +63,19 @@ namespace PluginDriveList
          */
         internal void Reload(Rainmeter.API rm, ref double maxValue)
         {
-            errorString = rm.ReadString("ErrorString", "oops.");
+            skinHandle = rm.GetSkin();
+            finishAction = rm.ReadString("FinishAction", "");
+            errorString = rm.ReadString("ErrorString", "");
             // set type settings in dictionary
             listedTypes[DriveType.Fixed] = (rm.ReadInt("Fixed", 1) == 1 ? true : false);
             listedTypes[DriveType.Removable] = (rm.ReadInt("Removable", 1) == 1 ? true : false);
             listedTypes[DriveType.Network] = (rm.ReadInt("Network", 1) == 1 ? true : false);
             listedTypes[DriveType.CDRom] = (rm.ReadInt("Optical", 0) == 1 ? true : false);
             listedTypes[DriveType.Ram] = (rm.ReadInt("Ram", 0) == 1 ? true : false);
+#if DEBUG
+            API.Log(API.LogType.Notice, "DriveList FinishAction: " + finishAction);
+            API.Log(API.LogType.Notice, "DriveList ErrorString: " + errorString);
+#endif
         }
 
         /* Runs every update cycle.  Retrieves connected drives with GetDrives(),
@@ -76,11 +85,10 @@ namespace PluginDriveList
         internal double Update()
         {
             // make list of drive letters (in new thread)
-            Thread listThread = new Thread(new ThreadStart(buildDriveLetterList));
+            Thread listThread = new Thread(new ThreadStart(coroutineUpdate));
             listThread.IsBackground = true;
             listThread.Start();
-            // check to make sure CurrentIndex is OKAY
-            checkIndexRange();
+            
             // return the number of drives in the list
             return (double)driveLetters.Count;
         }
@@ -128,8 +136,11 @@ namespace PluginDriveList
         /* Clears and repopulates the list of drive letters
          * from an array of DriveInfo objects.
          */
-        private void buildDriveLetterList()
+        private void coroutineUpdate()
         {
+#if DEBUG
+            API.Log(API.LogType.Notice, "DriveList: started coroutine");
+#endif
             List<string> temp = new List<string>();
             // get array of DriveInfo objects
             DriveInfo[] drives = DriveInfo.GetDrives();
@@ -141,9 +152,18 @@ namespace PluginDriveList
                     temp.Add(d.Name.Substring(0, 2));
                 }
             }
-            // attempt to limit shared memory access in future threading by only accessing driveLetters in one place?
+            // -attempt- to limit shared memory access by only accessing driveLetters in one place?
             driveLetters.Clear();
             driveLetters.AddRange(temp);
+            checkIndexRange();
+
+            if (!String.IsNullOrEmpty(finishAction))
+            {
+#if DEBUG
+                API.Log(API.LogType.Notice, "DriveList - Executing FinishAction");
+#endif
+                API.Execute(skinHandle, finishAction);
+            }
         }
 
         /* Make sure the index is not out of bounds.  
