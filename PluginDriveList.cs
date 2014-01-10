@@ -47,6 +47,9 @@ namespace PluginDriveList
         // lock for driveLetters and currentIndex:
         // (they are nearly always used in the same context)
         private readonly object dl_lock = new object();
+        
+        // queued work item flag
+        private bool queued = false;
 
         /* Measure object constructor initializes class fields
          */
@@ -93,11 +96,11 @@ namespace PluginDriveList
          */
         internal double Update()
         {
-            
             // make list of drive letters (in new thread)
-            Thread listThread = new Thread(new ThreadStart(coroutineUpdate));
-            listThread.IsBackground = true;
-            listThread.Start();
+            if (!queued)
+            {
+                queued = ThreadPool.QueueUserWorkItem(new WaitCallback(coroutineUpdate));
+            }
             
             // return the number of drives in the list
             double localCount = 0;
@@ -160,7 +163,7 @@ namespace PluginDriveList
         /* Clears and repopulates the list of drive letters
          * from an array of DriveInfo objects.
          */
-        private void coroutineUpdate()
+        private void coroutineUpdate(Object stateInfo)
         {
 #if DEBUG
             API.Log(API.LogType.Notice, "DriveList: started coroutine");
@@ -191,6 +194,8 @@ namespace PluginDriveList
 #endif
                 API.Execute(skinHandle, finishAction);
             }
+
+            queued = false;
         }
 
         /* Make sure the index is not out of bounds.  
