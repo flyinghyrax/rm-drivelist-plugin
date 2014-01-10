@@ -1,5 +1,5 @@
 ﻿/*
-  Copyright (C) 2013 Matthew Seiler
+  Copyright (C) 2014 Matthew Seiler
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU General Public License
@@ -17,9 +17,18 @@
 */
 
 /* TODO:
+ * * ...for the heck of it:
  * - Version with only one thread that loops and is reused
  * - Version with BackgroundWorker
- * ...for the heck of it.
+ * ...might actually be useful:
+ * - csv list option of drive letters that will be included even if they are removed
+ */
+
+/* Credits:
+ * jsmorley
+ * poiru
+ * cjthompson
+ * brian
  */
 using System;
 using System.IO;
@@ -30,12 +39,14 @@ using Rainmeter;
 
 namespace PluginDriveList
 {
+    /// <summary>
+    /// Defines a measure object instance for this plugin.
+    /// </summary>
     internal class Measure
     {
         private IntPtr skinHandle;
         // measure settings
         private string finishAction = "";
-        private string errorString = "";
         private Dictionary<DriveType, bool> listedTypes;
         // return values (sort of)
         private List<string> driveLetters;
@@ -49,9 +60,10 @@ namespace PluginDriveList
         // queued work item flag
         private bool queued = false;
 
-        /* Measure object constructor initializes type settings dict
-         * and empty list for drive letters.
-         */
+        /// <summary>
+        /// Measure object constructor initializes type settings dict 
+        /// and empty list for drive letters.
+        /// </summary>
         internal Measure()
         {
             listedTypes = new Dictionary<DriveType, bool>
@@ -67,9 +79,12 @@ namespace PluginDriveList
             driveLetters = new List<string>();
         }
 
-        /* Runs on load/refresh on on every update cycle if DynamicVariables is set.
-         * Reads ErrorString, FinishAction, and drive type settings.
-         */
+        /// <summary>
+        /// Runs on load/refresh on on every update cycle if DynamicVariables is set.
+        /// Reads ErrorString, FinishAction, and drive type settings.
+        /// </summary>
+        /// <param name="rm">Rainmeter API instance</param>
+        /// <param name="maxValue">Ref to MaxValue (unused here)</param>
         internal void Reload(Rainmeter.API rm, ref double maxValue)
         {
             skinHandle = rm.GetSkin();
@@ -77,7 +92,6 @@ namespace PluginDriveList
             lock (setting_lock)
             {
                 finishAction = rm.ReadString("FinishAction", "");
-                errorString = rm.ReadString("ErrorString", "");
                 // set type settings in dictionary
                 listedTypes[DriveType.Fixed] = (rm.ReadInt("Fixed", 1) == 1 ? true : false);
                 listedTypes[DriveType.Removable] = (rm.ReadInt("Removable", 1) == 1 ? true : false);
@@ -87,14 +101,14 @@ namespace PluginDriveList
             }
 #if DEBUG
             API.Log(API.LogType.Notice, "DriveList FinishAction: " + finishAction);
-            API.Log(API.LogType.Notice, "DriveList ErrorString: " + errorString);
 #endif
         }
 
-        /* Runs every update cycle.  If no background work is queued (there is no background update
-         * thread already runnning) then enqueue a new background work item w/ the coroutineUpdate method.
-         * Returns the number of items in the drive letter list (questionably useful).
-         */
+        /// <summary>
+        /// Runs every update cycle.  If no background work is queued (there is no background update
+        /// thread already runnning) then enqueue a new background work item w/ the coroutineUpdate method.
+        /// </summary>
+        /// <returns>double - number of items in list of drive letters</returns>
         internal double Update()
         {
             // make list of drive letters (in new thread)
@@ -111,43 +125,44 @@ namespace PluginDriveList
             }
             return localCount;
         }
-
-        /* Returns the drive letter of the drive at CurrentIndex in listedDrives,
-         * or ErrorString if CurrentIndex is out of bounds (or other error).
-         * TODO: because we EXPECT that driveLetters will be empty when GetString is first called,
-         * we should NOT be using exception handling.
-         * Could eliminate ErrorString and reduce number of locks taken by this method.
-         */
+ 
+        /// <summary>
+        /// Called as-needed, provides string value for the measure.
+        /// In this case, the current drive letter in the driveLetters list, 
+        /// specified by currentIndex.  Will return ErrorString if driveLetters is empty.
+        /// </summary>
+        /// <returns>string - drive letter of drive at currenIndex in driveLetters, or ErrorString</returns>
+        // TODO: because we EXPECT that driveLetters will be empty when GetString is first called,
+        // we should NOT be using exception handling.
+        // Could eliminate ErrorString and reduce number of locks taken by this method.
         internal string GetString()
         {
-            string t;
-            Monitor.Enter(return_lock);
-            Monitor.Enter(setting_lock);
-            try
+            string returnMe = "_:";
+            lock (return_lock)
             {
-                t = driveLetters[currentIndex];
+                if (driveLetters.Count != 0)
+                {
+                    try
+                    {
+                        returnMe = driveLetters[currentIndex];
+                    }
+                    catch (Exception ex) 
+                    {
+                        API.Log(API.LogType.Error, "DriveList: " + ex.Message);
+                    }
+                }
             }
-            catch
-            {
-#if DEBUG
-                API.Log(API.LogType.Warning, "DriveList: caught exception in GetString");
-#endif
-                t = errorString;
-            }
-            finally
-            {
-                Monitor.Exit(return_lock);
-                Monitor.Exit(setting_lock);
-            }
-            return t;
+            return returnMe;
         }
 
-        /* Accepts "!CommandMeasure" bangs w/ arguments "forward"
-         * to move the current index up and "backward" to
-         * move the current index down.
-         * Locks return value to read number of items in driveLetters and
-         * mutate currentIndex.
-         */
+        /// <summary>
+        /// Accepts "!CommandMeasure" bangs w/ arguments "forward"
+        /// to move the current index up and "backward" to
+        /// move the current index down.
+        /// Locks return value to read number of items in driveLetters and
+        /// mutate currentIndex.
+        /// </summary>
+        /// <param name="args">string - the arguments to a !CommandMeasure bang</param>
         internal void ExecuteBang(string args)
         {
             lock (return_lock)  // locks driveLetters and currentIndex
@@ -168,10 +183,12 @@ namespace PluginDriveList
             }   
         }
 
-        /* Method that will run in a background thread and create the list of drive letters.
-         * Could probably stand to be broken into subroutines.
-         * Should consider implementing lock on 'queued' flag.
-         */
+        /// <summary>
+        /// Performs drive list update functions in the background via QueueUserWorkItem.
+        /// Could probably stand to be broken into subroutines.
+        /// Should consider implementing a lock on the 'queued' flag.
+        /// </summary>
+        /// <param name="stateInfo">object - state parameter for WaitCallBack</param>
         private void coroutineUpdate(Object stateInfo)
         {
 #if DEBUG
@@ -208,7 +225,7 @@ namespace PluginDriveList
             if (!String.IsNullOrEmpty(localAction))
             {
 #if DEBUG
-                API.Log(API.LogType.Notice, "DriveList - Executing FinishAction");
+                API.Log(API.LogType.Notice, "DriveList: Executing FinishAction");
 #endif
                 API.Execute(skinHandle, localAction);
             }
@@ -216,10 +233,11 @@ namespace PluginDriveList
             queued = false;
         }
 
-        /* Make sure the index is not out of bounds.  
-         * Will set the index to -1 if there are no drives in the list.
-         * Locked from outside in coroutineUpdate().
-         */
+        /// <summary>
+        /// Make sure currentIndex is not out-of-bounds for driveLetters.
+        /// Will set the index to -1 if there are no drives in the list.
+        /// Locked from outside in coroutineUpdate().
+        /// </summary>
         private void checkIndexRange()
         { 
             if (currentIndex >= driveLetters.Count)
@@ -230,10 +248,11 @@ namespace PluginDriveList
 
     }
 
-    /* Binds the Measure class to the low-level Rainmeter C-based API.
-     * Rainmeter calls methods in the static plugin class w/ a measure id,
-     * and the Plugin class calls the methods of the correct Measure instance.
-     */
+    /// <summary>
+    /// Binds the Measure class to the low-level Rainmeter C-based API.
+    /// Rainmeter calls methods in the static plugin class w/ a measure id,
+    /// and the Plugin class calls the methods of the correct Measure instance.
+    /// </summary>
     public static class Plugin
     {
         [DllExport]
