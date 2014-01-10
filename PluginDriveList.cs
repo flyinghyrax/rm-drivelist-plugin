@@ -16,6 +16,12 @@
   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+
+/* TODO:
+ * - Memory locks!
+ * - Work with local copies of listedTypes (another lock)
+ * - Try BackgroundWorker
+ */
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -38,11 +44,14 @@ namespace PluginDriveList
         // Index of the "current" element in the above list.
         private int currentIndex;
 
+        // lock for driveLetters and currentIndex:
+        // (they are nearly always used in the same context)
+        private readonly object dl_lock = new object();
+
         /* Measure object constructor initializes class fields
          */
         internal Measure()
         {
-            
             listedTypes = new Dictionary<DriveType, bool>
                 {
                     {DriveType.Fixed, true},
@@ -84,13 +93,19 @@ namespace PluginDriveList
          */
         internal double Update()
         {
+            
             // make list of drive letters (in new thread)
             Thread listThread = new Thread(new ThreadStart(coroutineUpdate));
             listThread.IsBackground = true;
             listThread.Start();
             
             // return the number of drives in the list
-            return (double)driveLetters.Count;
+            double localCount = 0;
+            lock (dl_lock)
+            {
+                localCount = (double)driveLetters.Count;
+            }
+            return localCount;
         }
 
         /* Returns the drive letter of the drive at CurrentIndex in listedDrives,
@@ -99,6 +114,7 @@ namespace PluginDriveList
         internal string GetString()
         {
             string t;
+            Monitor.Enter(dl_lock);
             try
             {
                 t = driveLetters[currentIndex];
@@ -110,6 +126,10 @@ namespace PluginDriveList
 #endif
                 t = errorString;
             }
+            finally
+            {
+                Monitor.Exit(dl_lock);
+            }
             return t;
         }
 
@@ -119,18 +139,22 @@ namespace PluginDriveList
          */
         internal void ExecuteBang(string args)
         {
-            switch (args.ToLowerInvariant())
+            lock (dl_lock)  // locks driveLetters and currentIndex
             {
-                case "forward":
-                    currentIndex = ((currentIndex + 1) % driveLetters.Count);
-                    break;
-                case "backward":
-                    currentIndex = (int)((currentIndex - 1) - (Math.Floor((currentIndex - 1D) / driveLetters.Count) * driveLetters.Count));
-                    break;
-                default:
-                    API.Log(API.LogType.Error, "DriveList: Invalid command \"" + args + "\"");
-                    break;
-            }
+                int localCount = driveLetters.Count;
+                switch (args.ToLowerInvariant())
+                {
+                    case "forward":
+                        currentIndex = (localCount == 0 ? 0 : ((currentIndex + 1) % localCount));
+                        break;
+                    case "backward":
+                        currentIndex = (localCount == 0 ? 0 : (int)((currentIndex - 1) - (Math.Floor((currentIndex - 1D) / localCount) * localCount)));
+                        break;
+                    default:
+                        API.Log(API.LogType.Error, "DriveList: Invalid command \"" + args + "\"");
+                        break;
+                }
+            }   
         }
 
         /* Clears and repopulates the list of drive letters
@@ -140,6 +164,7 @@ namespace PluginDriveList
         {
 #if DEBUG
             API.Log(API.LogType.Notice, "DriveList: started coroutine");
+            Thread.Sleep(3000); // for testing
 #endif
             List<string> temp = new List<string>();
             // get array of DriveInfo objects
@@ -153,9 +178,12 @@ namespace PluginDriveList
                 }
             }
             // -attempt- to limit shared memory access by only accessing driveLetters in one place?
-            driveLetters.Clear();
-            driveLetters.AddRange(temp);
-            checkIndexRange();
+            lock (dl_lock)
+            {
+                driveLetters.Clear();
+                driveLetters.AddRange(temp);
+                checkIndexRange();
+            }
 
             if (!String.IsNullOrEmpty(finishAction))
             {
@@ -168,6 +196,7 @@ namespace PluginDriveList
 
         /* Make sure the index is not out of bounds.  
          * Will set the index to -1 if there are no drives in the list.
+         * Locked from outside.
          */
         private void checkIndexRange()
         { 
