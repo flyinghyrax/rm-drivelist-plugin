@@ -7,6 +7,7 @@ Although the plugin seems to work fine for me as-is, it can apparently cause Rai
 
 #### Options
 * `ErrorString` - the plugin returns this string on error or before the drive list is populated.
+* `FinishAction` - bang(s) to be executed when the plugin finishes enumerating connected drives.
 
 Types of drives to include in the list.  Set to 1 to include, or 0 to exclude.  `Fixed`, `Removable`, and `Network` are included by default.
 
@@ -36,9 +37,10 @@ DynamicWindowSize=1
 Measure=PLUGIN
 Plugin=DriveList.dll
 ErrorString="C:"
+FinishAction=[!UpdateMeasureGroup "fdsGroup"][!UpdateMeter *]
 Optical=1
 Network=0
-UpdateDivider=20
+UpdateDivider=10
 
 [measureDiskLabel]
 Measure=FREEDISKSPACE
@@ -52,7 +54,7 @@ Group=fdsGroup
 Measure=FREEDISKSPACE
 Drive=[measureDriveList]
 DynamicVariables=1
-UpdateDivider=60
+UpdateDivider=-1
 Group=fdsGroup
 
 [meterDriveName]

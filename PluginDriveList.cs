@@ -164,7 +164,6 @@ namespace PluginDriveList
         {
 #if DEBUG
             API.Log(API.LogType.Notice, "DriveList: started coroutine");
-            Thread.Sleep(3000); // for testing
 #endif
             List<string> temp = new List<string>();
             // get array of DriveInfo objects
