@@ -22,9 +22,9 @@ Cycle through the list of drive letters
 * `[!CommandMeasure "yourDriveListMeasure" "Backward"]`
  
 #### Issues / To-do:
-+ Put ErrorString back in?
-+ More testing
-+ New option: comma-separated list of drive letters that will be included even if not mounted
++ Default return value as a measure option
++ csv list of drive letters that will always be included in the list even if not mounted
++ Child measure capability where the nth child measure returns the nth drive (so many connected drives could be displayed at once in individual meters)
  
 #### Example Skin
 ```
