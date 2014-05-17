@@ -33,6 +33,10 @@
  * - Child measure capability where the nth child measure returns the nth drive
  *   (so many connected drives could be displayed at once in individual meters)
  */
+
+#define DLLEXPORT_GETSTRING
+#define DLLEXPORT_EXECUTEBANG
+
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -48,10 +52,10 @@ namespace PluginDriveList
     internal class Measure
     {
         /* Constants */
-        private readonly string DEFAULT_RETURN = "_:";
+        private readonly string DEFAULT_RETURN = "_";
 
         /* Measure instance settings */
-        private IntPtr skinHandle;  // reference to the skin this measure is part of
+        private IntPtr skinHandle;      // reference to the skin this measure is part of
         private string finishAction;    // FinishAction setting
         private Dictionary<DriveType, bool> listedTypes;    // types of drives that this measure will list
         
@@ -129,6 +133,7 @@ namespace PluginDriveList
             return localCount;
         }
  
+#if DLLEXPORT_GETSTRING
         /// <summary>
         /// Called as-needed, provides string value for the measure. In this case, 
         /// the current drive letter in the driveLetters list, specified by currentIndex.
@@ -146,7 +151,9 @@ namespace PluginDriveList
             }
             return returnMe;
         }
+#endif
 
+#if DLLEXPORT_EXECUTEBANG
         /// <summary>
         /// Accepts "!CommandMeasure" bangs w/ arguments "forward"
         /// to move the current index up and "backward" to move the current index down.
@@ -172,6 +179,7 @@ namespace PluginDriveList
                 }
             }   
         }
+#endif
 
         /// <summary>
         /// Performs drive list update functions in the background via QueueUserWorkItem.
@@ -262,49 +270,72 @@ namespace PluginDriveList
     /// </summary>
     public static class Plugin
     {
+#if DLLEXPORT_GETSTRING
+        static IntPtr StringBuffer = IntPtr.Zero;
+#endif
+
         [DllExport]
-        public unsafe static void Initialize(void** data, void* rm)
+        public static void Initialize(ref IntPtr data, IntPtr rm)
         {
-            uint id = (uint)((void*)*data);
-            Measures.Add(id, new Measure());
+            data = GCHandle.ToIntPtr(GCHandle.Alloc(new Measure()));
         }
 
         [DllExport]
-        public unsafe static void Finalize(void* data)
+        public static void Finalize(IntPtr data)
         {
-            uint id = (uint)data;
-            Measures.Remove(id);
+            GCHandle.FromIntPtr(data).Free();
+            
+#if DLLEXPORT_GETSTRING
+            if (StringBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(StringBuffer);
+                StringBuffer = IntPtr.Zero;
+            }
+#endif
         }
 
         [DllExport]
-        public unsafe static void Reload(void* data, void* rm, double* maxValue)
+        public static void Reload(IntPtr data, IntPtr rm, ref double maxValue)
         {
-            uint id = (uint)data;
-            Measures[id].Reload(new Rainmeter.API((IntPtr)rm), ref *maxValue);
+            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
+            measure.Reload(new Rainmeter.API(rm), ref maxValue);
         }
 
         [DllExport]
-        public unsafe static double Update(void* data)
+        public static double Update(IntPtr data)
         {
-            uint id = (uint)data;
-            return Measures[id].Update();
+            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
+            return measure.Update();
         }
-
+        
+#if DLLEXPORT_GETSTRING
         [DllExport]
-        public unsafe static char* GetString(void* data)
+        public static IntPtr GetString(IntPtr data)
         {
-            uint id = (uint)data;
-            fixed (char* s = Measures[id].GetString()) return s;
-        }
+            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
+            if (StringBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(StringBuffer);
+                StringBuffer = IntPtr.Zero;
+            }
 
+            string stringValue = measure.GetString();
+            if (stringValue != null)
+            {
+                StringBuffer = Marshal.StringToHGlobalUni(stringValue);
+            }
+
+            return StringBuffer;
+        }
+#endif
+
+#if DLLEXPORT_EXECUTEBANG
         [DllExport]
-        public unsafe static void ExecuteBang(void* data, char* args)
+        public static void ExecuteBang(IntPtr data, IntPtr args)
         {
-            uint id = (uint)data;
-            Measures[id].ExecuteBang(new string(args));
+            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
+            measure.ExecuteBang(Marshal.PtrToStringUni(args));
         }
-
-        // Maps measure IDs to Measure objects
-        internal static Dictionary<uint, Measure> Measures = new Dictionary<uint, Measure>();
+#endif
     }
 }
