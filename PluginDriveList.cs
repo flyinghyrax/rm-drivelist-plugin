@@ -32,12 +32,6 @@
  * - poiru
  * - cjthompson
  * - brian
- * 
- * ~~ TODO ~~
- * - test parent/child
- * - add the old cycling list features back in as a type?
- *   (I'm not sure if that's even possible without making a huge mess, but I can
- *   see use cases for both plugin styles...)
  */
 
 using System;
@@ -49,32 +43,63 @@ using Rainmeter;
 
 namespace PluginDriveList
 {
-    // properties or methods which apply to ALL measure regardless of type go here
+    enum MeasureNumberType { Count, Status }
+
     internal class Measure
     {
+        // for logging
         protected readonly string TAG = "DriveList.dll: ";
-
+        
+        // the type of numeric return value for this measure
+        protected MeasureNumberType numberType;
+        
+        // index in drive list for this measure
         protected int driveIndex;
+        
+        // parent measure - a parent's parent is itself.
         protected ParentMeasure parent;
+        
+        // name of this measure
+        internal string measureName;
+        
+        // pointer to the skin containing this measure
+        internal IntPtr skinHandle;
 
         protected Measure()
         {
+            numberType = MeasureNumberType.Status;
             driveIndex = -1;
         }
 
         internal virtual void Reload(Rainmeter.API api, ref double maxValue)
         {
-            int idx = api.ReadInt("Index", 0);
-            if (idx == -1)
+            // we will use this for logging and parent/child matching
+            measureName = api.GetMeasureName();
+            skinHandle = api.GetSkin();
+            // read the 'NumberType' setting
+            string t = api.ReadString("NumberType", "status").ToLowerInvariant();
+            if (t.Equals("status"))
             {
-                API.Log(API.LogType.Warning, TAG + "'Index' setting invalid in " + api.GetMeasureName());
+                numberType = MeasureNumberType.Status;
             }
+            else if (t.Equals("count"))
+            {
+                numberType = MeasureNumberType.Count;
+            }
+            else
+            {
+                API.Log(API.LogType.Warning, TAG + "'NumberType=" + t + "' invalid in " + measureName);
+                numberType = MeasureNumberType.Status;
+            }
+            // read the 'Index' setting
+            int idx = api.ReadInt("Index", -1);
+            // TODO: validate somehow?
             driveIndex = idx;
         }
         
         internal virtual double Update()
         {
-            return (parent != null ? parent.getUpdateValue(driveIndex) : -1.0);
+            return (parent != null ? parent.getUpdateValue(numberType, driveIndex) : -1.0);
         }
         
         internal virtual string GetString()
@@ -84,7 +109,6 @@ namespace PluginDriveList
 
         internal virtual void Dispose() 
         {
-
         }
             
     }
@@ -95,13 +119,15 @@ namespace PluginDriveList
 
         internal override void Reload(API api, ref double maxValue)
         {
+            // read measure name, skin, 'NumberType', and 'Index'
             base.Reload(api, ref maxValue);
+            // read 'Parent' setting and match with parent measure
             string parentName = api.ReadString("Parent", "");
-            IntPtr mySkin = api.GetSkin();
             parent = null;
             foreach (ParentMeasure p in ParentMeasure.ParentMeasures)
             {
-                if (p.Skin.Equals(mySkin) && p.Name.Equals(parentName))
+                if (p.skinHandle.Equals(this.skinHandle) 
+                    && p.measureName.Equals(parentName))
                 {
                     parent = p;
                     break;
@@ -109,31 +135,36 @@ namespace PluginDriveList
             }
             if (parent == null)
             {
-                API.Log(API.LogType.Error, "DriveList.dll: Parent=" + parentName + " not valid");
+                API.Log(API.LogType.Error, "DriveList.dll: 'Parent=" + parentName + "' not valid in " + measureName);
             }
         }
     }
 
-
     internal class ParentMeasure : Measure
     {
-        /* parent measure settings */
+        // this string will be returned by GetString if it can't get a drive letter at the specified index
         private string defaultString;
+        
+        // bangs to execute when the parent finishes updating the drive list
         private string finishAction;
+       
+        // dicitonary of flags specifiying which drive types to keep in the list
         private Dictionary<DriveType, bool> listedTypes;
-
-        /* list of drives associated with this parent measure */
+        
+        // the actual list of drive letters
         private List<string> driveLetters;
 
-        /* Locks and flag for concurrency */
+        // locks the finishAction and listedTypes settings, since they are used on the worker thread
         private readonly object setting_lock = new object();
+        
+        // locks the driveLetters list, since it is mutated on the worker thread
         private readonly object return_lock = new object();
+        
+        // flag is true when an an update is running on the worker thread
         private volatile bool queued = false;
-
-        /* for parent/child relationships */
+        
+        // contains every parent measure from every skin, so that child measures can find a reference to their parent
         internal static List<ParentMeasure> ParentMeasures = new List<ParentMeasure>();
-        internal string Name;
-        internal IntPtr Skin;
 
         internal ParentMeasure() : base()
         {
@@ -162,17 +193,18 @@ namespace PluginDriveList
 
         internal override void Reload(API api, ref double maxValue)
         {
+            // read measure name, skin, 'Index' setting, and 'NumberType' setting
             base.Reload(api, ref maxValue);
 
-            Name = api.GetMeasureName();
-            Skin = api.GetSkin();
-
+            // read the 'DefaultString' setting
             defaultString = api.ReadString("DefaultString", defaultString);
             
             // these settings are used in worker thread, so explicitly lock
             lock (setting_lock)
             {
+                // read the 'FinishAction' setting
                 finishAction = api.ReadString("FinishAction", "");
+                // read each of the drive type settings
                 listedTypes[DriveType.Fixed] = (api.ReadInt("Fixed", 1) == 1 ? true : false);
                 listedTypes[DriveType.Removable] = (api.ReadInt("Removable", 1) == 1 ? true : false);
                 listedTypes[DriveType.Network] = (api.ReadInt("Network", 1) == 1 ? true : false);
@@ -191,14 +223,21 @@ namespace PluginDriveList
             return base.Update();
         }
 
-        internal double getUpdateValue(int idx)
+        internal double getUpdateValue(MeasureNumberType type, int idx)
         {
-            double inBounds;
+            double returnMe;
             lock (return_lock)
             {
-                inBounds = (isInBounds(driveLetters, idx) ? 1.0 : 0.0);
+                if (type.Equals(MeasureNumberType.Status))
+                {
+                    returnMe = (isInBounds(driveLetters, idx) ? 1.0 : 0.0);
+                }
+                else // if (type.Equals(MeasureNumberType.Count))
+                {
+                    returnMe = (double)driveLetters.Count;
+                }
             }
-            return inBounds;
+            return returnMe;
         }
 
         internal string getStringValue(int idx)
@@ -215,7 +254,7 @@ namespace PluginDriveList
         {
             return (isInBounds(list, index) ? list[index] : def);
         }
-
+        
         private bool isInBounds<T>(List<T> list, int index)
         {
             return (list != null && list.Count > 0 && index >= 0 && index < list.Count);
@@ -223,9 +262,6 @@ namespace PluginDriveList
 
         private void coroutineUpdate(Object stateInfo)
         {
-#if DEBUG
-            API.Log(API.LogType.Notice, "DriveList: started coroutine");
-#endif
             // read measure settings into local copies
             Dictionary<DriveType, bool> localTypes;
             string localAction;
@@ -236,7 +272,7 @@ namespace PluginDriveList
             }
             // get a list of drive letters using the types we pulled from settings
             List<string> temp = getDriveLetters(localTypes);
-            // copy our local list of drive letters out to shared memory and check the value of currentIndex
+            // copy our local list of drive letters out to shared memory
             lock (return_lock)
             {
                 driveLetters.Clear();
@@ -245,10 +281,7 @@ namespace PluginDriveList
             // run FinishAction if specified
             if (!String.IsNullOrEmpty(localAction))
             {
-#if DEBUG
-                API.Log(API.LogType.Notice, "DriveList: Executing FinishAction");
-#endif
-                API.Execute(Skin, localAction);
+                API.Execute(skinHandle, localAction);
             }
             // reset "queued" flag
             queued = false;
