@@ -1,7 +1,9 @@
 ﻿/* ~~ Rainmeter DriveList plugin ~~
- * Maintains a list of connected drives, and returns one of the drive letters from the list
- * as a string that can be used as the "Drive" value of a FreeDiskSpace measure.
- * In this way a skin can be made that can cycle through all mounted drives with no hardcoded drive letters.
+ * Keeps a list of connected drives of specified types.
+ * Each measure sets an "Index"; that measure will then return the drive letter 
+ * from that position in the list of drives.  The string value can then be used 
+ * in a FreeDiskSpace measure, so that a skin can return drive info without the
+ * user having to specify drive letters in the .ini or a settings file.
  * 
  * ~~ LICENSE ~~
  * Copyright (C) 2014 Matthew Seiler
@@ -27,15 +29,11 @@
  * - brian
  * 
  * ~~ TODO ~~
- * - Default return value as a measure option
- * - csv list of drive letters that will always be included in the list
- *   regardless of whether or not they are connected
- * - Child measure capability where the nth child measure returns the nth drive
- *   (so many connected drives could be displayed at once in individual meters)
+ * - test parent/child
+ * - add the old cycling list features back in as a type?
+ *   (I'm not sure if that's even possible without making a huge mess, but I can
+ *   see use cases for both plugin styles...)
  */
-
-#define DLLEXPORT_GETSTRING
-#define DLLEXPORT_EXECUTEBANG
 
 using System;
 using System.IO;
@@ -46,34 +44,96 @@ using Rainmeter;
 
 namespace PluginDriveList
 {
-    /// <summary>
-    /// Defines a measure object instance for this plugin.
-    /// </summary>
+    // properties or methods which apply to ALL measure regardless of type go here
     internal class Measure
     {
-        /* Constants */
-        private readonly string DEFAULT_RETURN = "_";
+        protected readonly string TAG = "DriveList.dll: ";
 
-        /* Measure instance settings */
-        private IntPtr skinHandle;      // reference to the skin this measure is part of
-        private string finishAction;    // FinishAction setting
-        private Dictionary<DriveType, bool> listedTypes;    // types of drives that this measure will list
+        protected int driveIndex;
+        protected ParentMeasure parent;
+
+        protected Measure()
+        {
+            driveIndex = -1;
+        }
+
+        internal virtual void Reload(Rainmeter.API api, ref double maxValue)
+        {
+            int idx = api.ReadInt("Index", 0);
+            if (idx == -1)
+            {
+                API.Log(API.LogType.Warning, TAG + "'Index' setting invalid in " + api.GetMeasureName());
+            }
+            driveIndex = idx;
+        }
         
-        /* Measure drive list state */
-        private List<string> driveLetters;
-        private int currentIndex = 0;
+        internal virtual double Update()
+        {
+            return (parent != null ? parent.getUpdateValue(driveIndex) : -1.0);
+        }
+        
+        internal virtual string GetString()
+        {
+            return (parent != null ? parent.getStringValue(driveIndex) : "");
+        }
 
-        /* Locks for concurrency and a 'working' flag */
+        internal virtual void Dispose() 
+        {
+
+        }
+            
+    }
+
+    internal class ChildMeasure : Measure
+    {
+        internal ChildMeasure() : base() {}
+
+        internal override void Reload(API api, ref double maxValue)
+        {
+            base.Reload(api, ref maxValue);
+            string parentName = api.ReadString("Parent", "");
+            IntPtr mySkin = api.GetSkin();
+            parent = null;
+            foreach (ParentMeasure p in ParentMeasure.ParentMeasures)
+            {
+                if (p.Skin.Equals(mySkin) && p.Name.Equals(parentName))
+                {
+                    parent = p;
+                    break;
+                }
+            }
+            if (parent == null)
+            {
+                API.Log(API.LogType.Error, "DriveList.dll: Parent=" + parentName + " not valid");
+            }
+        }
+    }
+
+
+    internal class ParentMeasure : Measure
+    {
+        /* parent measure settings */
+        private string defaultString;
+        private string finishAction;
+        private Dictionary<DriveType, bool> listedTypes;
+
+        /* list of drives associated with this parent measure */
+        private List<string> driveLetters;
+
+        /* Locks and flag for concurrency */
         private readonly object setting_lock = new object();
         private readonly object return_lock = new object();
-        private bool queued = false;
+        private volatile bool queued = false;
 
-        /// <summary>
-        /// Measure object constructor initializes type settings dict 
-        /// and empty list for drive letters.
-        /// </summary>
-        internal Measure()
+        /* for parent/child relationships */
+        internal static List<ParentMeasure> ParentMeasures = new List<ParentMeasure>();
+        internal string Name;
+        internal IntPtr Skin;
+
+        internal ParentMeasure() : base()
         {
+            defaultString = "_";
+            finishAction = "";
             listedTypes = new Dictionary<DriveType, bool>
                 {
                     {DriveType.Fixed, true},
@@ -85,108 +145,77 @@ namespace PluginDriveList
                     {DriveType.Unknown, false}
                 };
             driveLetters = new List<string>();
+            ParentMeasures.Add(this);
+            this.parent = this;
         }
 
-        /// <summary>
-        /// Runs on load/refresh, or on every update cycle if DynamicVariables is set.
-        /// Reads FinishAction and drive type settings.
-        /// </summary>
-        /// <param name="rm">Rainmeter API instance</param>
-        /// <param name="maxValue">Ref to MaxValue (unused here)</param>
-        internal void Reload(Rainmeter.API rm, ref double maxValue)
+        internal override void Dispose()
         {
-            skinHandle = rm.GetSkin();
+            this.parent = null;
+            ParentMeasures.Remove(this);
+        }
 
+        internal override void Reload(API api, ref double maxValue)
+        {
+            base.Reload(api, ref maxValue);
+
+            Name = api.GetMeasureName();
+            Skin = api.GetSkin();
+
+            defaultString = api.ReadString("DefaultString", defaultString);
+            
+            // these settings are used in worker thread, so explicitly lock
             lock (setting_lock)
             {
-                finishAction = rm.ReadString("FinishAction", "");
-                listedTypes[DriveType.Fixed] = (rm.ReadInt("Fixed", 1) == 1 ? true : false);
-                listedTypes[DriveType.Removable] = (rm.ReadInt("Removable", 1) == 1 ? true : false);
-                listedTypes[DriveType.Network] = (rm.ReadInt("Network", 1) == 1 ? true : false);
-                listedTypes[DriveType.CDRom] = (rm.ReadInt("Optical", 0) == 1 ? true : false);
-                listedTypes[DriveType.Ram] = (rm.ReadInt("Ram", 0) == 1 ? true : false);
+                finishAction = api.ReadString("FinishAction", "");
+                listedTypes[DriveType.Fixed] = (api.ReadInt("Fixed", 1) == 1 ? true : false);
+                listedTypes[DriveType.Removable] = (api.ReadInt("Removable", 1) == 1 ? true : false);
+                listedTypes[DriveType.Network] = (api.ReadInt("Network", 1) == 1 ? true : false);
+                listedTypes[DriveType.CDRom] = (api.ReadInt("Optical", 0) == 1 ? true : false);
+                listedTypes[DriveType.Ram] = (api.ReadInt("Ram", 0) == 1 ? true : false);
             }
-#if DEBUG
-            API.Log(API.LogType.Notice, "DriveList FinishAction: " + finishAction);
-#endif
         }
 
-        /// <summary>
-        /// Runs every update cycle.  If no background work is queued (there is no background update
-        /// thread already runnning) then enqueue a new background work item w/ the coroutineUpdate method.
-        /// </summary>
-        /// <returns>double - number of items in list of drive letters</returns>
-        internal double Update()
+        internal override double Update()
         {
             // Update list of drive letters in a worker thread
             if (!queued)
             {
                 queued = ThreadPool.QueueUserWorkItem(new WaitCallback(coroutineUpdate));
             }
-            
-            // Return the number of drives in the list
-            double localCount = 0;
-            lock (return_lock)
-            {
-                localCount = (double)driveLetters.Count;
-            }
-            return localCount;
+            return base.Update();
         }
- 
-#if DLLEXPORT_GETSTRING
-        /// <summary>
-        /// Called as-needed, provides string value for the measure. In this case, 
-        /// the current drive letter in the driveLetters list, specified by currentIndex.
-        /// </summary>
-        /// <returns>string - drive letter of drive at currenIndex in driveLetters, or a default</returns>
-        internal string GetString()
+
+        internal double getUpdateValue(int idx)
         {
-            string returnMe = DEFAULT_RETURN;
+            double inBounds;
             lock (return_lock)
             {
-                if (driveLetters.Count != 0 && currentIndex >= 0)
-                {
-                    returnMe = driveLetters[currentIndex];
-                }
+                inBounds = (isInBounds(driveLetters, idx) ? 1.0 : 0.0);
+            }
+            return inBounds;
+        }
+
+        internal string getStringValue(int idx)
+        {
+            string returnMe;
+            lock (return_lock)
+            {
+                returnMe = safeGet(driveLetters, idx, defaultString);
             }
             return returnMe;
         }
-#endif
 
-#if DLLEXPORT_EXECUTEBANG
-        /// <summary>
-        /// Accepts "!CommandMeasure" bangs w/ arguments "forward"
-        /// to move the current index up and "backward" to move the current index down.
-        /// Locks return value to read number of items in driveLetters and mutate currentIndex.
-        /// </summary>
-        /// <param name="args">string - the arguments to a !CommandMeasure bang</param>
-        internal void ExecuteBang(string args)
+        private T safeGet<T>(List<T> list, int index, T def)
         {
-            lock (return_lock)  // locks driveLetters and currentIndex
-            {
-                int localCount = driveLetters.Count;
-                switch (args.ToLowerInvariant())
-                {
-                    case "forward":
-                        currentIndex = (localCount == 0 ? 0 : ((currentIndex + 1) % localCount));
-                        break;
-                    case "backward":
-                        currentIndex = (localCount == 0 ? 0 : (int)((currentIndex - 1) - (Math.Floor((currentIndex - 1D) / localCount) * localCount)));
-                        break;
-                    default:
-                        API.Log(API.LogType.Error, "DriveList: Invalid command \"" + args + "\"");
-                        break;
-                }
-            }   
+            return (isInBounds(list, index) ? list[index] : def);
         }
-#endif
 
-        /// <summary>
-        /// Performs drive list update functions in the background via QueueUserWorkItem.
-        /// Could probably stand to be broken into subroutines.
-        /// Should consider implementing a lock on the 'queued' flag.
-        /// </summary>
-        /// <param name="stateInfo">object - state parameter for WaitCallBack</param>
+        private bool isInBounds<T>(List<T> list, int index)
+        {
+            return (list != null && list.Count > 0 && index >= 0 && index < list.Count);
+        }
+
         private void coroutineUpdate(Object stateInfo)
         {
 #if DEBUG
@@ -207,7 +236,6 @@ namespace PluginDriveList
             {
                 driveLetters.Clear();
                 driveLetters.AddRange(temp);
-                checkIndexRange();
             }
             // run FinishAction if specified
             if (!String.IsNullOrEmpty(localAction))
@@ -215,17 +243,12 @@ namespace PluginDriveList
 #if DEBUG
                 API.Log(API.LogType.Notice, "DriveList: Executing FinishAction");
 #endif
-                API.Execute(skinHandle, localAction);
+                API.Execute(Skin, localAction);
             }
             // reset "queued" flag
             queued = false;
         }
 
-        /// <summary>
-        /// Uses DriveInfo to get all connected drives, then filters based on type and if the drive is in a ready state
-        /// </summary>
-        /// <param name="driveTypes">Dictionary of flags specifiying which types to include in the list</param>
-        /// <returns>A list of drive letters</returns>
         private List<string> getDriveLetters(Dictionary<DriveType, bool> driveTypes)
         {
             List<string> temp = new List<string>();
@@ -241,26 +264,6 @@ namespace PluginDriveList
             }
             return temp;
         }
-
-        /// <summary>
-        /// Make sure currentIndex is not out-of-bounds for driveLetters.
-        /// - Sets the index to -1 if there are no drives in the list.
-        /// - Sets the index to 0 if the index was -1 but the list is no longer empty.
-        /// Locked from outside in coroutineUpdate().
-        /// </summary>
-        private void checkIndexRange()
-        {
-            int c = driveLetters.Count;
-            if (currentIndex >= c)
-            {
-                currentIndex = c - 1;
-            }
-            else if (currentIndex < 0 && c > 0)
-            {
-                currentIndex = 0;
-            }
-        }
-
     }
 
     /// <summary>
@@ -270,28 +273,29 @@ namespace PluginDriveList
     /// </summary>
     public static class Plugin
     {
-#if DLLEXPORT_GETSTRING
         static IntPtr StringBuffer = IntPtr.Zero;
-#endif
 
         [DllExport]
         public static void Initialize(ref IntPtr data, IntPtr rm)
         {
-            data = GCHandle.ToIntPtr(GCHandle.Alloc(new Measure()));
+            API api = new Rainmeter.API(rm);
+            string parent = api.ReadString("Parent", "");
+            Measure m = (String.IsNullOrEmpty(parent) ? (Measure) new ParentMeasure() : new ChildMeasure());
+            data = GCHandle.ToIntPtr(GCHandle.Alloc(m));
         }
 
         [DllExport]
         public static void Finalize(IntPtr data)
         {
+            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
+            measure.Dispose();
             GCHandle.FromIntPtr(data).Free();
             
-#if DLLEXPORT_GETSTRING
             if (StringBuffer != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(StringBuffer);
                 StringBuffer = IntPtr.Zero;
             }
-#endif
         }
 
         [DllExport]
@@ -308,7 +312,6 @@ namespace PluginDriveList
             return measure.Update();
         }
         
-#if DLLEXPORT_GETSTRING
         [DllExport]
         public static IntPtr GetString(IntPtr data)
         {
@@ -327,15 +330,5 @@ namespace PluginDriveList
 
             return StringBuffer;
         }
-#endif
-
-#if DLLEXPORT_EXECUTEBANG
-        [DllExport]
-        public static void ExecuteBang(IntPtr data, IntPtr args)
-        {
-            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
-            measure.ExecuteBang(Marshal.PtrToStringUni(args));
-        }
-#endif
     }
 }
