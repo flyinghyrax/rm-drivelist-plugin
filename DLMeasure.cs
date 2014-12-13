@@ -84,6 +84,6 @@ namespace PluginDriveList
             return parent != null ? parent.getStringValue(this.driveIndex) : this.defaultString;
         }
 
-        internal virtual void Dispose();
+        internal virtual void Dispose() { }
     }
 }
