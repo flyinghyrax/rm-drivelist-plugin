@@ -76,9 +76,9 @@
       <Link>RainmeterAPI.cs</Link>
     </Compile>
     <Compile Include="AssemblyInfo.cs" />
-    <Compile Include="DLChildMeasure.cs" />
-    <Compile Include="DLMeasure.cs" />
-    <Compile Include="DLParentMeasure.cs" />
+    <Compile Include="ChildMeasure.cs" />
+    <Compile Include="Measure.cs" />
+    <Compile Include="ParentMeasure.cs" />
     <Compile Include="PluginDriveList.cs" />
   </ItemGroup>
   <ItemGroup>

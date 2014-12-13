@@ -18,35 +18,51 @@
  * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-using System;
-using System.Collections.Generic;
 using Rainmeter;
+using System;
 
 namespace PluginDriveList
 {
-    internal class DLMeasure
+    /* Defines behavior common to both parent and child measures.
+     * 
+     * We could avoid the use of abstract by moving the parent measure list management and dispose()
+     * logic up and out into the Plugin class, but it does provide some semantic value (since this
+     * should only ever be used as a superclass) and there may also be some value to hiding
+     * the parent measure management stuff down in the measure hierarchy instead of putting it in Plugin.
+     */
+    internal abstract class Measure
     {
-        protected static List<DLParentMeasure> ParentMeasures = new List<DLParentMeasure>();
-
+        // name of this measure
         internal string measureName;
         
+        // skin containing this measure
         internal IntPtr skinHandle;
 
-        protected DLParentMeasure parent;
+        // parent for this measure (the parent of a parent is itself)
+        protected ParentMeasure parent;
 
+        // type of numeric value to return
         private MeasureNumberType numberType;
 
+        // index in list of drives for this measure
         private int driveIndex;
 
+        // default value to return when index is out of bounds
         internal string defaultString;
 
-        protected DLMeasure()
+        /* Superclass constructor just defines some defaults.
+         * Otherwise rather boring.  Unnecessary, even.
+         */
+        protected Measure()
         {
             this.numberType = MeasureNumberType.Status;
             this.driveIndex = -1;
             this.defaultString = "";
         }
 
+        /* Reload behavior for all measures.
+         * Grabs the measure name, current skin, numeric return type, and drive list index.
+         */
         internal virtual void Reload(Rainmeter.API api, ref double maxValue)
         {
             // we will use this for logging and parent/child matching
@@ -74,16 +90,26 @@ namespace PluginDriveList
             driveIndex = idx; // TODO: validate somehow?
         }
 
+        /* Number value returned by the measure.  All measures retrieve this value from their parent.
+         */
         internal virtual double Update()
         {
-            return parent != null ? parent.getUpdateValue(this.numberType, this.driveIndex) : 0d;
+            return parent != null
+                ? parent.getUpdateValue(this.numberType, this.driveIndex)
+                : 0d;
         }
 
-        internal virtual string GetString()
+        /* String value returned by the measure.  Again, all measures retrieve this value from their parent.
+         */
+        internal string GetString()
         {
-            return parent != null ? parent.getStringValue(this.driveIndex) : this.defaultString;
+            return parent != null
+                ? parent.getStringValue(this.driveIndex, this.defaultString)
+                : this.defaultString;
         }
 
-        internal virtual void Dispose() { }
+        /* Parent measures need this to clean themselves out of the ParentMeasures collection.
+         */
+        internal abstract void Dispose();
     }
 }

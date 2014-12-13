@@ -34,15 +34,20 @@
  * - brian
  */
 
+using Rainmeter;
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using Rainmeter;
 
 namespace PluginDriveList
 {
+    /* Measures can return either the number of drives or the 
+     * status of their index for their numeric value.
+     */
     enum MeasureNumberType { Count, Status }
 
+    /* Some generic utility methods.
+     */
     public static class Helpers
     {
         public static T safeGet<T>(List<T> list, int index, T def)
@@ -55,12 +60,11 @@ namespace PluginDriveList
             return (list != null && list.Count > 0 && index >= 0 && index < list.Count);
         }
     }
-
-    /// <summary>
-    /// Binds the Measure class to the low-level Rainmeter C-based API.
-    /// Rainmeter calls methods in the static plugin class w/ a measure id,
-    /// and the Plugin class calls the methods of the correct Measure instance.
-    /// </summary>
+ 
+    /* Binds the Measure class to the low-level Rainmeter C-based API.
+     * Rainmeter calls methods in the static plugin class w/ a measure id,
+     * and the Plugin class calls the methods of the correct Measure instance.
+     */
     public static class Plugin
     {
         internal static readonly string TAG = "DriveList.dll: ";
@@ -72,14 +76,14 @@ namespace PluginDriveList
         {
             API api = new Rainmeter.API(rm);
             string parent = api.ReadString("Parent", "");
-            DLMeasure m = (String.IsNullOrEmpty(parent) ? (DLMeasure) new DLParentMeasure() : new DLChildMeasure());
+            Measure m = (String.IsNullOrEmpty(parent) ? (Measure) new ParentMeasure() : new ChildMeasure());
             data = GCHandle.ToIntPtr(GCHandle.Alloc(m));
         }
 
         [DllExport]
         public static void Finalize(IntPtr data)
         {
-            DLMeasure measure = (DLMeasure)GCHandle.FromIntPtr(data).Target;
+            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
             measure.Dispose();
             GCHandle.FromIntPtr(data).Free();
             
@@ -93,21 +97,21 @@ namespace PluginDriveList
         [DllExport]
         public static void Reload(IntPtr data, IntPtr rm, ref double maxValue)
         {
-            DLMeasure measure = (DLMeasure)GCHandle.FromIntPtr(data).Target;
+            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
             measure.Reload(new Rainmeter.API(rm), ref maxValue);
         }
 
         [DllExport]
         public static double Update(IntPtr data)
         {
-            DLMeasure measure = (DLMeasure)GCHandle.FromIntPtr(data).Target;
+            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
             return measure.Update();
         }
         
         [DllExport]
         public static IntPtr GetString(IntPtr data)
         {
-            DLMeasure measure = (DLMeasure)GCHandle.FromIntPtr(data).Target;
+            Measure measure = (Measure)GCHandle.FromIntPtr(data).Target;
             if (StringBuffer != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(StringBuffer);

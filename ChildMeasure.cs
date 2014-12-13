@@ -18,16 +18,21 @@
  * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-using System;
-using System.Collections.Generic;
 using Rainmeter;
 
 namespace PluginDriveList
 {
-    internal class DLChildMeasure : DLMeasure
+    /* Defines behavior for child measures.  Keeps most things from the superclass, but extends
+     * Reload() to handle child-specific options (like finding a parent measure).
+     */
+    internal class ChildMeasure : Measure
     {
-        internal DLChildMeasure() : base() { }
+        /* Construct a child measure.  (Just passes through to the base class.)
+         */
+        internal ChildMeasure() : base() { }
 
+        /* Handles "Parent" and "DefaultString" measure options.
+         */
         internal override void Reload(API api, ref double maxValue)
         {
             // read measure name, skin, 'NumberType', and 'Index'
@@ -37,7 +42,7 @@ namespace PluginDriveList
             string parentName = api.ReadString("Parent", "");
             parent = null;
 
-            foreach (DLParentMeasure p in DLParentMeasure.ParentMeasures)
+            foreach (ParentMeasure p in ParentMeasure.ParentMeasures)
             {
                 if (p.skinHandle.Equals(this.skinHandle)
                     && p.measureName.Equals(parentName))
@@ -54,7 +59,11 @@ namespace PluginDriveList
             }
 
             // read the defaultString setting, and use the value from the parent measure if this child doesn't specify one.
+            // defaultString = api.ReadString("DefaultString", parent.defaultString);
             defaultString = api.ReadString("DefaultString", parent.defaultString);
         }
+
+        /* no-op */
+        internal override void Dispose() { }
     }
 }

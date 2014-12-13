@@ -18,28 +18,42 @@
  * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-using System;
-using System.IO;
-using System.Collections.Generic;
-using System.Threading;
 using Rainmeter;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading;
 
 namespace PluginDriveList
 {
-    internal class DLParentMeasure : DLMeasure
+    /* Defines behavior for parent measures.  All the actual update logic is in this subclass,
+     * since child measures retrieve their return values from their parent.
+     */
+    internal class ParentMeasure : Measure
     {
+        // collection of all known parent measures, to match children to parents
+        internal static List<ParentMeasure> ParentMeasures = new List<ParentMeasure>();
+        
+        // locks for the concurrent update thread
         private readonly object setting_lock = new object();
         private readonly object return_lock = new object();
 
+        // flag for the concurrent update thread
         private volatile bool queued = false;
         
+        // Rainmeter action (bangs) to execute when the worker thread finishes an update cycle
         private string finishAction;
 
+        // our list of drive letters
         private List<string> driveLetters;
 
+        // defines which kinds of drives to include in the above list
         private Dictionary<DriveType, bool> listedTypes;
 
-        internal DLParentMeasure() : base()
+        /* Construct a parent measure.  Defines some default settings 
+         * and adds self to the parent measure collection.
+         */
+        internal ParentMeasure() : base()
         {
             this.finishAction = "";
             this.driveLetters = new List<string>();
@@ -53,15 +67,19 @@ namespace PluginDriveList
                 {DriveType.Unknown, false}
             };
 
-            DLMeasure.ParentMeasures.Add(this);
+            ParentMeasures.Add(this);
             this.parent = this;
         }
 
+        /* Clean up - removes self from the collection of parent measures 
+         */
         internal override void Dispose()
         {
-            DLMeasure.ParentMeasures.Remove(this);
+            ParentMeasures.Remove(this);
         }
 
+        /* Parent measure reload behavior.
+         */
         internal override void Reload(API api, ref double maxValue)
         {
             // read measure name, skin, 'Index' setting, and 'NumberType' setting
@@ -84,16 +102,21 @@ namespace PluginDriveList
             }
         }
 
+        /* Parent measure update behavior - kicks off a background thread to handle the real work
+         * before calling up the superclass implementation.
+         */
         internal override double Update()
         {
             // Update list of drive letters in a worker thread
             if (!queued)
             {
-                queued = ThreadPool.QueueUserWorkItem(new WaitCallback(coroutineUpdate));
+                queued = ThreadPool.QueueUserWorkItem(new WaitCallback(concurrentUpdate));
             }
             return base.Update();
         }
 
+        /* Allows child measures to retrieve their numeric values from the parent.
+         */
         internal double getUpdateValue(MeasureNumberType type, int idx)
         {
             double returnMe;
@@ -114,17 +137,21 @@ namespace PluginDriveList
             return returnMe;
         }
 
-        internal string getStringValue(int idx)
+        /* Allows child measures to retrieve their string values from the parent
+         */
+        internal string getStringValue(int idx, string def)
         {
             string returnMe;
             lock (return_lock)
             {
-                returnMe = Helpers.safeGet(driveLetters, idx, defaultString);
+                returnMe = Helpers.safeGet(driveLetters, idx, def);
             }
             return returnMe;
         }
 
-        private void coroutineUpdate(Object stateInfo)
+        /* Does the actual list updating.  Executed in a worker thread to avoid hanging Rainmeter
+         */
+        private void concurrentUpdate(Object stateInfo)
         {
             // read measure settings into local copies
             Dictionary<DriveType, bool> localTypes;
@@ -134,23 +161,30 @@ namespace PluginDriveList
                 localTypes = new Dictionary<DriveType, bool>(listedTypes);
                 localAction = finishAction;
             }
+            
             // get a list of drive letters using the types we pulled from settings
             List<string> temp = getDriveLetters(localTypes);
+            
             // copy our local list of drive letters out to shared memory
             lock (return_lock)
             {
                 driveLetters.Clear();
                 driveLetters.AddRange(temp);
             }
+            
             // run FinishAction if specified
             if (!String.IsNullOrEmpty(localAction))
             {
                 API.Execute(skinHandle, localAction);
             }
+            
             // reset "queued" flag
             queued = false;
         }
 
+        /* Helper method for concurrentUpdate that will return a list of drive letter strings,
+         * given a dictionary defining which types to include.
+         */
         private List<string> getDriveLetters(Dictionary<DriveType, bool> driveTypes)
         {
             List<string> temp = new List<string>();
