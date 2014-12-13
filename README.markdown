@@ -46,6 +46,8 @@ Per the main [plugin measure documentation][plugindoc-link], all general measure
 + `Optical` - 1 to include attached optical drives in the list, 0 to exclude (default 0)
 + `Ram` - 1 to include ram disks inthe list, 0 to exclude (default 0)
 
+### Full example skin #
+See [usage_example.ini](/usage_example.ini)
 
 [sectionvar-link]: http://docs.rainmeter.net/manual/variables/section-variables
 [freediskspace-link]: http://docs.rainmeter.net/manual/measures/freediskspace
